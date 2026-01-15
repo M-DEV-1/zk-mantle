@@ -24,6 +24,7 @@ interface ProofRequest {
 }
 
 export async function POST(req: Request) {
+    let input: any = null;
     try {
         const body: ProofRequest = await req.json();
         const { type, userAddress, requestId } = body;
@@ -53,14 +54,16 @@ export async function POST(req: Request) {
             });
 
             if (existingProof) {
-                console.log('Returning existing proof for request:', requestId);
-                return NextResponse.json({
-                    success: true,
-                    proof: existingProof.proof,
-                    publicSignals: existingProof.publicSignals,
-                    proofId: existingProof._id,
-                    cached: true
-                });
+                // FORCE REGENERATION for debugging/fix
+                // console.log('Returning existing proof for request:', requestId);
+                // return NextResponse.json({
+                //     success: true,
+                //     proof: existingProof.proof,
+                //     publicSignals: existingProof.publicSignals,
+                //     proofId: existingProof._id,
+                //     cached: true
+                // });
+                console.log('Ignoring existing proof to force regeneration (fix mode)');
             }
         }
 
@@ -76,12 +79,10 @@ export async function POST(req: Request) {
             );
         }
 
-        let input: Record<string, any>;
-
         if (type === 'age') {
-            const { birthYear, birthMonth, birthDay, referenceYear, challenge } = body;
+            const { birthYear, referenceYear, challenge } = body;
 
-            if (!birthYear || !birthMonth || !birthDay || !referenceYear || !challenge) {
+            if (!birthYear || !referenceYear || !challenge) {
                 return NextResponse.json(
                     { error: 'Missing required age proof inputs' },
                     { status: 400 }
@@ -89,9 +90,7 @@ export async function POST(req: Request) {
             }
 
             input = {
-                birthYear,
-                birthMonth,
-                birthDay,
+                dobYear: birthYear,
                 referenceYear,
                 challenge: BigInt(challenge).toString()
             };
@@ -112,11 +111,14 @@ export async function POST(req: Request) {
                 userLon: Math.round(userLon * scale),
                 providerLat: Math.round(providerLat * scale),
                 providerLon: Math.round(providerLon * scale),
-                radiusSquared: Math.round(radiusKm * radiusKm * scale * scale)
+                radius: Math.round(radiusKm * scale) // Circuit expects radius (linear), it squares it internally
             };
         }
 
         console.log(`Generating ${type} proof for user:`, userAddress);
+        console.log('SnarkJS Inputs:', JSON.stringify(input, (key, value) =>
+            typeof value === 'bigint' ? value.toString() : value
+            , 2));
 
         // Generate ZK proof using SnarkJS + Circom WASM
         const { proof, publicSignals } = await snarkjs.groth16.fullProve(
@@ -132,7 +134,14 @@ export async function POST(req: Request) {
         const vkey = JSON.parse(fs.readFileSync(vkeyPath, 'utf-8'));
         const isValid = await snarkjs.groth16.verify(vkey, publicSignals, proof);
 
-        console.log('Local verification result:', isValid);
+        console.log(`Local verification result for ${type}:`, isValid);
+        console.log('Public Signals:', publicSignals);
+
+        if (!isValid) {
+            console.error("FATAL: Generated proof failed local verification!");
+            console.error("This indicates a mismatch between zkey (generation) and vkey (verification).");
+            throw new Error("Proof validitiy check failed");
+        }
 
         // Store proof in MongoDB (per-user)
         const storedProof = await Proof.create({
@@ -178,7 +187,10 @@ export async function POST(req: Request) {
     } catch (error: any) {
         console.error('Proof generation error:', error);
         return NextResponse.json(
-            { error: error.message || 'Proof generation failed' },
+            {
+                error: error.message || 'Proof generation failed',
+                inputDebug: input // Return input for debugging
+            },
             { status: 500 }
         );
     }

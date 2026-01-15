@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import axios from "axios";
-import { pinata, fetchVCPrivate } from "@/lib/pinata";
+import { pinata } from "@/lib/pinata";
 
 interface VerificationRequest {
     _id: string;
@@ -58,6 +58,7 @@ export default function UserDashboard() {
     // Requests State
     const [requests, setRequests] = useState<VerificationRequest[]>([]);
     const [loadingRequests, setLoadingRequests] = useState(true);
+    const [processingRequestId, setProcessingRequestId] = useState<string | null>(null);
 
     useEffect(() => {
         setMounted(true);
@@ -160,6 +161,9 @@ export default function UserDashboard() {
     };
 
     const handleAcceptRequest = async (request: VerificationRequest) => {
+        if (processingRequestId === request._id) return;
+        setProcessingRequestId(request._id);
+
         const requestId = request._id;
         const requestType = request.type;
         try {
@@ -170,10 +174,11 @@ export default function UserDashboard() {
                 return;
             }
 
-            // 2. Fetch user's VC from IPFS
+            // 2. Fetch user's VC from IPFS (via server proxy)
             if (cid) {
                 try {
-                    const { data: vcData } = await fetchVCPrivate(cid);
+                    const vcResponse = await axios.get(`/api/user/fetch-vc?cid=${cid}`);
+                    const vcData = vcResponse.data;
 
                     console.log('VC Data for proof generation:', vcData);
 
@@ -184,7 +189,8 @@ export default function UserDashboard() {
                         const birthMonth = dobDate.getMonth() + 1;
                         const birthDay = dobDate.getDate();
                         const currentYear = new Date().getFullYear();
-                        const challenge = Date.now().toString();
+                        // Use a simple random number string for challenge
+                        const challenge = Math.floor(Math.random() * 1000000000).toString();
 
                         console.log('Generating AGE proof:', { birthYear, birthMonth, birthDay });
 
@@ -253,6 +259,8 @@ export default function UserDashboard() {
         } catch (error) {
             console.error("Accept error:", error);
             toast.error("Failed to accept request");
+        } finally {
+            setProcessingRequestId(null);
         }
     };
 

@@ -8,11 +8,14 @@ export function getPinata(): PinataSDK {
     }
 
     const jwt = process.env.PINATA_JWT;
-    const gateway = process.env.NEXT_PUBLIC_GATEWAY_URL;
+    let gateway = process.env.NEXT_PUBLIC_GATEWAY_URL;
 
     if (!jwt || !gateway) {
         throw new Error("PINATA_JWT or NEXT_PUBLIC_GATEWAY_URL is not set");
     }
+
+    // Sanitize gateway URL (remove protocol and trailing slash)
+    gateway = gateway.replace(/^https?:\/\//, '').replace(/\/$/, '');
 
     pinataInstance = new PinataSDK({
         pinataJwt: jwt,
