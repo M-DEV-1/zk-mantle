@@ -1,58 +1,50 @@
-import { ethers } from "hardhat";
+import hre from "hardhat";
 
 async function main() {
     console.log("Deploying ZK GPS contracts to Mantle Sepolia...\n");
 
-    const [deployer] = await ethers.getSigners();
-    console.log("Deployer:", deployer.address);
-    console.log("Balance:", ethers.formatEther(await ethers.provider.getBalance(deployer.address)), "MNT\n");
+    const publicClient = await hre.viem.getPublicClient();
+    const [deployer] = await hre.viem.getWalletClients();
+
+    console.log("Deployer:", deployer.account.address);
+
+    const balance = await publicClient.getBalance({ address: deployer.account.address });
+    console.log("Balance:", (Number(balance) / 1e18).toFixed(4), "MNT\n");
 
     // 1. Deploy Age Verifier (Groth16)
     console.log("1. Deploying Age Verifier...");
-    const AgeVerifier = await ethers.getContractFactory("contracts/VerifierAge.sol:Groth16Verifier");
-    const ageVerifier = await AgeVerifier.deploy();
-    await ageVerifier.waitForDeployment();
-    const ageVerifierAddress = await ageVerifier.getAddress();
-    console.log("   Age Verifier deployed to:", ageVerifierAddress);
+    const ageVerifier = await hre.viem.deployContract("contracts/VerifierAge.sol:Groth16Verifier");
+    console.log("   Age Verifier deployed to:", ageVerifier.address);
 
     // 2. Deploy Location Verifier (Groth16)
     console.log("2. Deploying Location Verifier...");
-    const LocationVerifier = await ethers.getContractFactory("contracts/VerifierLocation.sol:Groth16Verifier");
-    const locationVerifier = await LocationVerifier.deploy();
-    await locationVerifier.waitForDeployment();
-    const locationVerifierAddress = await locationVerifier.getAddress();
-    console.log("   Location Verifier deployed to:", locationVerifierAddress);
+    const locationVerifier = await hre.viem.deployContract("contracts/VerifierLocation.sol:Groth16Verifier");
+    console.log("   Location Verifier deployed to:", locationVerifier.address);
 
     // 3. Deploy ZKGPSVerifier (main registry)
     console.log("3. Deploying ZKGPSVerifier...");
-    const ZKGPSVerifier = await ethers.getContractFactory("ZKGPSVerifier");
-    const zkgpsVerifier = await ZKGPSVerifier.deploy(ageVerifierAddress);
-    await zkgpsVerifier.waitForDeployment();
-    const zkgpsVerifierAddress = await zkgpsVerifier.getAddress();
-    console.log("   ZKGPSVerifier deployed to:", zkgpsVerifierAddress);
+    const zkgpsVerifier = await hre.viem.deployContract("ZKGPSVerifier", [ageVerifier.address]);
+    console.log("   ZKGPSVerifier deployed to:", zkgpsVerifier.address);
 
     // 4. Deploy DID Registry
     console.log("4. Deploying DID Registry...");
-    const DIDRegistry = await ethers.getContractFactory("DIDRegistry");
-    const didRegistry = await DIDRegistry.deploy();
-    await didRegistry.waitForDeployment();
-    const didRegistryAddress = await didRegistry.getAddress();
-    console.log("   DID Registry deployed to:", didRegistryAddress);
+    const didRegistry = await hre.viem.deployContract("DIDRegistry");
+    console.log("   DID Registry deployed to:", didRegistry.address);
 
     // Summary
     console.log("\n" + "=".repeat(60));
     console.log("DEPLOYMENT COMPLETE");
     console.log("=".repeat(60));
     console.log(`
-Add these to your client .env:
+Add these to your client/.env:
 
-NEXT_PUBLIC_VERIFIER_AGE_ADDRESS=${ageVerifierAddress}
-NEXT_PUBLIC_VERIFIER_LOCATION_ADDRESS=${locationVerifierAddress}
-NEXT_PUBLIC_ZKGPS_VERIFIER_ADDRESS=${zkgpsVerifierAddress}
-NEXT_PUBLIC_DID_REGISTRY_ADDRESS=${didRegistryAddress}
+NEXT_PUBLIC_VERIFIER_AGE_ADDRESS=${ageVerifier.address}
+NEXT_PUBLIC_VERIFIER_LOCATION_ADDRESS=${locationVerifier.address}
+NEXT_PUBLIC_ZKGPS_VERIFIER_ADDRESS=${zkgpsVerifier.address}
+NEXT_PUBLIC_DID_REGISTRY_ADDRESS=${didRegistry.address}
 
 View on MantleScan:
-https://sepolia.mantlescan.xyz/address/${zkgpsVerifierAddress}
+https://sepolia.mantlescan.xyz/address/${zkgpsVerifier.address}
 `);
 }
 
