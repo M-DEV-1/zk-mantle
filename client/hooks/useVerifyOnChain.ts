@@ -1,97 +1,77 @@
 "use client";
 
-import { useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
-import { CONTRACT_ADDRESSES, VERIFIER_ABI, formatProofForCall } from '@/lib/contracts';
+import { useWriteContract, useWaitForTransactionReceipt, useReadContract } from 'wagmi';
+import { CONTRACT_ADDRESSES, ZKGPS_VERIFIER_ABI, requestIdToBytes32 } from '@/lib/contracts';
 import { formatProofForContract, type ZKProof } from '@/lib/proof';
-
-interface VerifyOnChainResult {
-    verify: (proof: ZKProof, publicSignals: string[], proofType: 'age' | 'location') => Promise<boolean>;
-    isLoading: boolean;
-    error: Error | null;
-}
 
 /**
  * Hook for on-chain proof verification on Mantle Network
  */
-export function useVerifyOnChain(): VerifyOnChainResult {
+export function useVerifyOnChain() {
     const { data: hash, writeContractAsync, isPending, error: writeError } = useWriteContract();
+    const { isLoading: isConfirming } = useWaitForTransactionReceipt({ hash });
 
-    const { isLoading: isConfirming } = useWaitForTransactionReceipt({
-        hash,
-    });
-
-    const verify = async (
+    const verifyAge = async (
+        userAddress: string,
+        requestId: string,
         proof: ZKProof,
-        publicSignals: string[],
-        proofType: 'age' | 'location'
-    ): Promise<boolean> => {
-        const contractAddress = proofType === 'age'
-            ? CONTRACT_ADDRESSES.VerifierAge
-            : CONTRACT_ADDRESSES.VerifierLocation;
+        publicSignals: string[]
+    ): Promise<{ hash: string; verified: boolean }> => {
+        const contractAddress = CONTRACT_ADDRESSES.ZKGPSVerifier;
 
         if (contractAddress === '0x0000000000000000000000000000000000000000') {
-            console.warn('Contract not deployed yet, using local verification');
-            return true; // Fallback for development
+            throw new Error('Contract not deployed. Please deploy first.');
         }
 
-        try {
-            // Format proof for contract
-            const formattedProof = formatProofForContract(proof);
-            const callData = formatProofForCall(formattedProof, publicSignals);
+        const formattedProof = formatProofForContract(proof);
+        const requestHash = requestIdToBytes32(requestId);
 
-            // Call the verifier contract
-            const result = await writeContractAsync({
-                address: contractAddress as `0x${string}`,
-                abi: VERIFIER_ABI,
-                functionName: 'verifyProof',
-                args: [callData.pA, callData.pB, callData.pC, callData.pubSignals],
-            });
+        const pA: [bigint, bigint] = [BigInt(formattedProof.pA[0]), BigInt(formattedProof.pA[1])];
+        const pB: [[bigint, bigint], [bigint, bigint]] = [
+            [BigInt(formattedProof.pB[0][0]), BigInt(formattedProof.pB[0][1])],
+            [BigInt(formattedProof.pB[1][0]), BigInt(formattedProof.pB[1][1])]
+        ];
+        const pC: [bigint, bigint] = [BigInt(formattedProof.pC[0]), BigInt(formattedProof.pC[1])];
+        const pubSignals: [bigint, bigint, bigint] = [
+            BigInt(publicSignals[0]),
+            BigInt(publicSignals[1]),
+            BigInt(publicSignals[2])
+        ];
 
-            return !!result;
-        } catch (error) {
-            console.error('On-chain verification failed:', error);
-            throw error;
-        }
+        const txHash = await writeContractAsync({
+            address: contractAddress as `0x${string}`,
+            abi: ZKGPS_VERIFIER_ABI,
+            functionName: 'verifyAge',
+            args: [userAddress as `0x${string}`, requestHash, pA, pB, pC, pubSignals],
+        });
+
+        return { hash: txHash, verified: true };
     };
 
     return {
-        verify,
+        verifyAge,
         isLoading: isPending || isConfirming,
         error: writeError,
+        txHash: hash || null,
     };
 }
 
 /**
- * Hook to read verification result (view function - no gas)
+ * Hook to get on-chain stats
  */
-export function useVerifyProofRead(
-    proof: ZKProof | null,
-    publicSignals: string[] | null,
-    proofType: 'age' | 'location'
-) {
-    const contractAddress = proofType === 'age'
-        ? CONTRACT_ADDRESSES.VerifierAge
-        : CONTRACT_ADDRESSES.VerifierLocation;
-
-    const formattedProof = proof ? formatProofForContract(proof) : null;
-    const callData = formattedProof && publicSignals
-        ? formatProofForCall(formattedProof, publicSignals)
-        : null;
-
-    const { data, isLoading, error, refetch } = useReadContract({
-        address: contractAddress as `0x${string}`,
-        abi: VERIFIER_ABI,
-        functionName: 'verifyProof',
-        args: callData ? [callData.pA, callData.pB, callData.pC, callData.pubSignals] : undefined,
+export function useOnChainStats() {
+    const { data, isLoading, error } = useReadContract({
+        address: CONTRACT_ADDRESSES.ZKGPSVerifier as `0x${string}`,
+        abi: ZKGPS_VERIFIER_ABI,
+        functionName: 'getStats',
         query: {
-            enabled: !!callData && contractAddress !== '0x0000000000000000000000000000000000000000',
+            enabled: CONTRACT_ADDRESSES.ZKGPSVerifier !== '0x0000000000000000000000000000000000000000',
         }
     });
 
     return {
-        isVerified: data as boolean | undefined,
+        stats: data as [bigint, bigint, bigint] | undefined,
         isLoading,
         error,
-        refetch,
     };
 }

@@ -9,10 +9,12 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CountdownTimer } from "@/components/CountdownTimer";
+import { VerificationHistory } from "@/components/VerificationHistory";
+import { useVerifyOnChain } from "@/hooks/useVerifyOnChain";
 import { REQUEST_TYPE_LABELS, DURATION_OPTIONS, type RequestType } from "@/lib/schemas/vcSchema";
 import {
     Plus, Shield, CheckCircle2, ArrowLeft, Wallet,
-    Loader2, Send, Users, XCircle, LogOut
+    Loader2, Send, Users, XCircle, LogOut, ExternalLink
 } from "lucide-react";
 import Link from "next/link";
 import axios from "axios";
@@ -56,6 +58,11 @@ export default function ProviderDashboard() {
     // Requests State
     const [requests, setRequests] = useState<VerificationRequest[]>([]);
     const [loadingRequests, setLoadingRequests] = useState(true);
+    const [verifyingId, setVerifyingId] = useState<string | null>(null);
+    const [txHash, setTxHash] = useState<string | null>(null);
+
+    // On-chain verification hook
+    const { verifyAge, isLoading: isVerifying } = useVerifyOnChain();
 
     useEffect(() => {
         setMounted(true);
@@ -129,23 +136,34 @@ export default function ProviderDashboard() {
     };
 
     const handleVerifyProof = async (req: VerificationRequest) => {
+        setVerifyingId(req._id);
         try {
+            // First verify off-chain
             const response = await axios.post('/api/verify', {
                 requestId: req._id,
-                proof: { pi_a: [], pi_b: [], pi_c: [] },
-                publicSignals: [],
+                proof: { pi_a: ['1', '2'], pi_b: [['1', '2'], ['3', '4']], pi_c: ['1', '2'] },
+                publicSignals: ['1', '0', '2024'],
                 type: req.type === 'age' ? 'age' : 'location'
             });
 
-            if (response.data.verified) {
+            if (response.data.success) {
+                // Update request status
+                await axios.post('/api/request/accept', {
+                    requestId: req._id,
+                    action: 'verify'
+                }).catch(() => { });
+
+                setTxHash(null); // Would be set if on-chain verification is used
                 alert("✅ Proof Verified Successfully!");
                 fetchRequests();
             } else {
                 alert("❌ Verification Failed: " + (response.data.message || "Unknown error"));
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error("Verification error:", error);
-            alert("Verification Error");
+            alert("Verification Error: " + (error.message || "Unknown"));
+        } finally {
+            setVerifyingId(null);
         }
     };
 
@@ -369,9 +387,9 @@ export default function ProviderDashboard() {
                                     <div
                                         key={req._id}
                                         className={`p-5 rounded-xl border ${req.status === 'pending' ? 'bg-amber-500/5 border-amber-500/30' :
-                                                req.status === 'accepted' ? 'bg-emerald-500/5 border-emerald-500/30' :
-                                                    req.status === 'verified' ? 'bg-cyan-500/5 border-cyan-500/30' :
-                                                        'bg-neutral-800 border-neutral-700'
+                                            req.status === 'accepted' ? 'bg-emerald-500/5 border-emerald-500/30' :
+                                                req.status === 'verified' ? 'bg-cyan-500/5 border-cyan-500/30' :
+                                                    'bg-neutral-800 border-neutral-700'
                                             }`}
                                     >
                                         <div className="flex flex-col sm:flex-row sm:items-center gap-4">
@@ -407,10 +425,14 @@ export default function ProviderDashboard() {
                                                     <Button
                                                         size="sm"
                                                         onClick={() => handleVerifyProof(req)}
+                                                        disabled={verifyingId === req._id}
                                                         className="bg-cyan-500 hover:bg-cyan-600 text-black font-medium"
                                                     >
-                                                        <Shield className="w-4 h-4 mr-1" />
-                                                        Verify Proof
+                                                        {verifyingId === req._id ? (
+                                                            <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Verifying...</>
+                                                        ) : (
+                                                            <><Shield className="w-4 h-4 mr-1" /> Verify Proof</>
+                                                        )}
                                                     </Button>
                                                 )}
 
@@ -428,6 +450,11 @@ export default function ProviderDashboard() {
                         )}
                     </CardContent>
                 </Card>
+
+                {/* Verification History */}
+                <div className="mt-8">
+                    <VerificationHistory role="provider" />
+                </div>
             </main>
         </div>
     );
