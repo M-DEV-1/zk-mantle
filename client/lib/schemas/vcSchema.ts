@@ -198,18 +198,14 @@ export function createVC(
 }
 
 /**
- * Request types for verification
+ * Request types for verification (ZK-proof based only)
  */
-export type RequestType = 'age' | 'location' | 'blood' | 'age+location' | 'age+blood' | 'location+blood' | 'all';
+export type RequestType = 'age' | 'location' | 'age+location';
 
 export const REQUEST_TYPE_LABELS: Record<RequestType, string> = {
-    'age': 'Age Verification',
-    'location': 'Location Check',
-    'blood': 'Blood Group',
-    'age+location': 'Age + Location',
-    'age+blood': 'Age + Blood Group',
-    'location+blood': 'Location + Blood Group',
-    'all': 'Full Verification'
+    'age': 'Age Verification (≥18)',
+    'location': 'Location Check (Within Radius)',
+    'age+location': 'Age + Location'
 };
 
 /**

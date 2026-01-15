@@ -8,26 +8,30 @@ const UserSchema = new Schema({
 });
 
 const RequestSchema = new Schema({
-    sessionId: { type: String, unique: true, sparse: true }, // Optional unique session ID
+    sessionId: { type: String, unique: true, sparse: true },
     providerAddress: { type: String, required: true },
     userAddress: { type: String, required: true },
     type: {
         type: String,
         required: true,
-        enum: ['age', 'location', 'blood', 'age+location', 'age+blood', 'location+blood', 'all'],
+        enum: ['age', 'location', 'age+location'],
     },
     status: {
         type: String,
         enum: ['pending', 'accepted', 'denied', 'expired', 'verified'],
         default: 'pending',
     },
-    duration: { type: Number, required: true }, // Duration in seconds (for timer)
-    acceptedAt: { type: Date }, // When user accepted (timer starts)
-    timerEnd: { type: Date }, // When timer expires
-    challenge: { type: String }, // Unique challenge for proof generation
-    proofStatus: { type: String, default: 'awaited' }, // awaited, generated, verified
-    proofId: { type: Schema.Types.ObjectId, ref: 'Proof' }, // Reference to stored proof
-    txHash: { type: String }, // On-chain transaction hash
+    duration: { type: Number, required: true },
+    acceptedAt: { type: Date },
+    timerEnd: { type: Date },
+    challenge: { type: String },
+    proofStatus: { type: String, default: 'awaited' },
+    proofId: { type: Schema.Types.ObjectId, ref: 'Proof' },
+    txHash: { type: String },
+    // Provider location for location verification
+    providerLat: { type: Number },
+    providerLon: { type: Number },
+    radiusKm: { type: Number, default: 10 },
     createdAt: { type: Date, default: Date.now },
 });
 

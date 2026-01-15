@@ -8,7 +8,7 @@ export async function POST(req: Request) {
 
     try {
         const body = await req.json();
-        const { providerAddress, userAddress, type, duration } = body;
+        const { providerAddress, userAddress, type, duration, providerLat, providerLon, radiusKm } = body;
 
         if (!providerAddress || !userAddress || !type || !duration) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
@@ -18,7 +18,7 @@ export async function POST(req: Request) {
         const sessionId = crypto.randomUUID();
         const challenge = crypto.randomBytes(16).toString('hex');
 
-        const newRequest = await VerificationRequest.create({
+        const requestData: any = {
             sessionId,
             providerAddress,
             userAddress,
@@ -26,7 +26,16 @@ export async function POST(req: Request) {
             duration,
             challenge,
             status: 'pending'
-        });
+        };
+
+        // Add location data if it's a location request
+        if (type === 'location' || type === 'age+location') {
+            requestData.providerLat = providerLat || 0;
+            requestData.providerLon = providerLon || 0;
+            requestData.radiusKm = radiusKm || 10;
+        }
+
+        const newRequest = await VerificationRequest.create(requestData);
 
         return NextResponse.json({ success: true, request: newRequest });
 

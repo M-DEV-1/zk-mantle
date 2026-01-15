@@ -3,8 +3,10 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import { injected } from "wagmi/connectors";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -14,7 +16,7 @@ import { useVerifyOnChain } from "@/hooks/useVerifyOnChain";
 import { REQUEST_TYPE_LABELS, DURATION_OPTIONS, type RequestType } from "@/lib/schemas/vcSchema";
 import {
     Plus, Shield, CheckCircle2, ArrowLeft, Wallet,
-    Loader2, Send, Users, XCircle, LogOut, ExternalLink
+    Loader2, Send, Users, XCircle, LogOut, ExternalLink, MapPin
 } from "lucide-react";
 import Link from "next/link";
 import axios from "axios";
@@ -54,12 +56,37 @@ export default function ProviderDashboard() {
     const [targetUser, setTargetUser] = useState("");
     const [requestType, setRequestType] = useState<RequestType>("age");
     const [duration, setDuration] = useState("300");
+    // Location request fields
+    const [providerLat, setProviderLat] = useState("");
+    const [providerLon, setProviderLon] = useState("");
+    const [radiusKm, setRadiusKm] = useState("10");
+    const [gettingLocation, setGettingLocation] = useState(false);
 
     // Requests State
     const [requests, setRequests] = useState<VerificationRequest[]>([]);
     const [loadingRequests, setLoadingRequests] = useState(true);
     const [verifyingId, setVerifyingId] = useState<string | null>(null);
     const [txHash, setTxHash] = useState<string | null>(null);
+
+    // Get current GPS location
+    const getCurrentLocation = () => {
+        if (!navigator.geolocation) {
+            alert("Geolocation not supported");
+            return;
+        }
+        setGettingLocation(true);
+        navigator.geolocation.getCurrentPosition(
+            (pos) => {
+                setProviderLat(pos.coords.latitude.toFixed(6));
+                setProviderLon(pos.coords.longitude.toFixed(6));
+                setGettingLocation(false);
+            },
+            () => {
+                alert("Could not get location");
+                setGettingLocation(false);
+            }
+        );
+    };
 
     // On-chain verification hook
     const { verifyAge, isLoading: isVerifying } = useVerifyOnChain();
@@ -113,23 +140,35 @@ export default function ProviderDashboard() {
 
         setIsSubmitting(true);
         try {
-            const response = await axios.post('/api/request/create', {
+            const requestData: any = {
                 providerAddress: address,
                 userAddress: targetUser,
                 type: requestType,
                 duration: parseInt(duration)
-            });
+            };
+
+            // Add location data for location requests
+            if (requestType === 'location' || requestType === 'age+location') {
+                requestData.providerLat = parseFloat(providerLat) || 0;
+                requestData.providerLon = parseFloat(providerLon) || 0;
+                requestData.radiusKm = parseFloat(radiusKm) || 10;
+            }
+
+            const response = await axios.post('/api/request/create', requestData);
 
             if (response.data.success) {
                 setIsCreating(false);
                 setTargetUser("");
                 setRequestType("age");
                 setDuration("300");
+                setProviderLat("");
+                setProviderLon("");
+                setRadiusKm("10");
                 fetchRequests();
             }
         } catch (error) {
             console.error("Error creating request:", error);
-            alert("Failed to create request");
+            toast.error("Failed to create request");
         } finally {
             setIsSubmitting(false);
         }
@@ -138,23 +177,45 @@ export default function ProviderDashboard() {
     const handleVerifyProof = async (req: VerificationRequest) => {
         setVerifyingId(req._id);
         try {
-            // Verify the proof
+            // 1. Fetch the stored proof for this user/request
+            const proofRes = await axios.get(`/api/proof/generate?userAddress=${req.userAddress}`);
+
+            let proof = { pi_a: ['1', '2'], pi_b: [['1', '2'], ['3', '4']], pi_c: ['1', '2'] };
+            let publicSignals = ['1', '0', '2024'];
+
+            if (proofRes.data.success && proofRes.data.proofs?.length > 0) {
+                // Find the proof for this request or use the latest
+                const storedProof = proofRes.data.proofs.find((p: any) => p.requestId === req._id)
+                    || proofRes.data.proofs[0];
+
+                if (storedProof?.proof?.pi_a) {
+                    proof = {
+                        pi_a: storedProof.proof.pi_a,
+                        pi_b: storedProof.proof.pi_b,
+                        pi_c: storedProof.proof.pi_c
+                    };
+                    publicSignals = storedProof.publicSignals || publicSignals;
+                    console.log('Using stored real proof:', storedProof._id);
+                }
+            }
+
+            // 2. Verify the proof
             const response = await axios.post('/api/verify', {
                 requestId: req._id,
-                proof: { pi_a: ['1', '2'], pi_b: [['1', '2'], ['3', '4']], pi_c: ['1', '2'] },
-                publicSignals: ['1', '0', '2024'],
+                proof,
+                publicSignals,
                 type: req.type === 'age' ? 'age' : 'location'
             });
 
-            if (response.data.success) {
-                alert("✅ Proof Verified Successfully!");
+            if (response.data.success && response.data.verified) {
+                toast.success("ZK Proof Verified!", { description: "The proof has been cryptographically verified." });
                 fetchRequests();
             } else {
-                alert("❌ Verification Failed: " + (response.data.message || "Unknown error"));
+                toast.error("Verification Failed", { description: response.data.message || "Invalid proof" });
             }
         } catch (error: any) {
             console.error("Verification error:", error);
-            alert("Verification Error: " + (error.message || "Unknown"));
+            toast.error("Verification Error", { description: error.message || "Unknown error" });
         } finally {
             setVerifyingId(null);
         }
@@ -318,6 +379,61 @@ export default function ProviderDashboard() {
                                         </SelectContent>
                                     </Select>
                                 </div>
+
+                                {/* Location fields - show when location type selected */}
+                                {(requestType === 'location' || requestType === 'age+location') && (
+                                    <>
+                                        <div className="col-span-2 pt-2 flex items-center justify-between">
+                                            <Label className="text-cyan-400 font-medium">📍 Provider Location (your verification area)</Label>
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="outline"
+                                                onClick={getCurrentLocation}
+                                                disabled={gettingLocation}
+                                                className="text-cyan-400 border-cyan-500/30 hover:bg-cyan-500/10"
+                                            >
+                                                {gettingLocation ? (
+                                                    <><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Getting...</>
+                                                ) : (
+                                                    <>📍 Use My Location</>
+                                                )}
+                                            </Button>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label className="text-neutral-400 text-sm">Latitude</Label>
+                                            <Input
+                                                type="number"
+                                                step="any"
+                                                placeholder="e.g. 28.6139"
+                                                value={providerLat}
+                                                onChange={(e) => setProviderLat(e.target.value)}
+                                                className="h-11 bg-neutral-800 border-neutral-700 text-white"
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label className="text-neutral-400 text-sm">Longitude</Label>
+                                            <Input
+                                                type="number"
+                                                step="any"
+                                                placeholder="e.g. 77.2090"
+                                                value={providerLon}
+                                                onChange={(e) => setProviderLon(e.target.value)}
+                                                className="h-11 bg-neutral-800 border-neutral-700 text-white"
+                                            />
+                                        </div>
+                                        <div className="space-y-2 col-span-2">
+                                            <Label className="text-neutral-400 text-sm">Radius (km)</Label>
+                                            <Input
+                                                type="number"
+                                                placeholder="10"
+                                                value={radiusKm}
+                                                onChange={(e) => setRadiusKm(e.target.value)}
+                                                className="h-11 bg-neutral-800 border-neutral-700 text-white max-w-32"
+                                            />
+                                        </div>
+                                    </>
+                                )}
                             </div>
                             <div className="mt-6 flex justify-end">
                                 <Button

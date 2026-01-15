@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useAccount, useSignMessage, useConnect, useDisconnect } from "wagmi";
 import { injected } from "wagmi/connectors";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -29,6 +30,10 @@ interface VerificationRequest {
     acceptedAt?: string;
     timerEnd?: string;
     createdAt: string;
+    // Location verification fields
+    providerLat?: number;
+    providerLon?: number;
+    radiusKm?: number;
 }
 
 export default function UserDashboard() {
@@ -95,7 +100,7 @@ export default function UserDashboard() {
 
     const getLocation = () => {
         if (!navigator.geolocation) {
-            alert("Geolocation is not supported by your browser");
+            toast.error("Geolocation not supported");
             return;
         }
         setIsGettingLocation(true);
@@ -108,7 +113,7 @@ export default function UserDashboard() {
                 setIsGettingLocation(false);
             },
             () => {
-                alert("Unable to get location. Please ensure location permissions are enabled.");
+                toast.error("Unable to get location", { description: "Please enable location permissions." });
                 setIsGettingLocation(false);
             }
         );
@@ -116,7 +121,7 @@ export default function UserDashboard() {
 
     const handleCreateVC = async () => {
         if (!name || !dob || !nationalId || !address) {
-            alert("Please fill in all required fields");
+            toast.error("Please fill in all required fields");
             return;
         }
 
@@ -147,20 +152,108 @@ export default function UserDashboard() {
             }
         } catch (error: any) {
             console.error("Error creating VC:", error);
-            alert(error.message || "Failed to create VC");
+            toast.error(error.message || "Failed to create VC");
         } finally {
             setIsSubmittingVC(false);
         }
     };
 
-    const handleAcceptRequest = async (requestId: string) => {
+    const handleAcceptRequest = async (request: VerificationRequest) => {
+        const requestId = request._id;
+        const requestType = request.type;
         try {
-            const response = await axios.post('/api/request/accept', { requestId });
-            if (response.data.success) {
-                fetchRequests();
+            // 1. Accept the request first
+            const acceptRes = await axios.post('/api/request/accept', { requestId });
+            if (!acceptRes.data.success) {
+                toast.error("Failed to accept request");
+                return;
             }
+
+            // 2. Fetch user's VC from IPFS
+            if (cid) {
+                try {
+                    const gatewayUrl = process.env.NEXT_PUBLIC_GATEWAY_URL || 'https://gateway.pinata.cloud';
+                    const vcResponse = await fetch(`${gatewayUrl}/ipfs/${cid}`);
+                    const vcData = await vcResponse.json();
+
+                    console.log('VC Data for proof generation:', vcData);
+
+                    // 3. Generate AGE proof if needed
+                    if (vcData.dob && (requestType === 'age' || requestType.includes('age'))) {
+                        const dobDate = new Date(vcData.dob);
+                        const birthYear = dobDate.getFullYear();
+                        const birthMonth = dobDate.getMonth() + 1;
+                        const birthDay = dobDate.getDate();
+                        const currentYear = new Date().getFullYear();
+                        const challenge = Date.now().toString();
+
+                        console.log('Generating AGE proof:', { birthYear, birthMonth, birthDay });
+
+                        const proofRes = await axios.post('/api/proof/generate', {
+                            userAddress: address,
+                            requestId,
+                            type: 'age',
+                            birthYear,
+                            birthMonth,
+                            birthDay,
+                            referenceYear: currentYear,
+                            challenge
+                        });
+
+                        if (proofRes.data.success) {
+                            console.log('✅ Age ZK proof generated:', proofRes.data.proofId);
+                        }
+                    }
+
+                    // 4. Generate LOCATION proof if needed - use LIVE GPS
+                    if (requestType === 'location' || requestType.includes('location')) {
+                        toast.info("Getting your live location...");
+
+                        // Get live GPS position
+                        const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+                            navigator.geolocation.getCurrentPosition(resolve, reject, {
+                                enableHighAccuracy: true,
+                                timeout: 10000
+                            });
+                        }).catch(() => null);
+
+                        if (position) {
+                            const userLat = position.coords.latitude;
+                            const userLon = position.coords.longitude;
+                            const providerLat = request.providerLat || 0;
+                            const providerLon = request.providerLon || 0;
+                            const radiusKm = request.radiusKm || 10;
+
+                            console.log('Generating LOCATION proof with LIVE GPS:', { userLat, userLon, providerLat, providerLon, radiusKm });
+                            toast.info("Generating location proof...");
+
+                            const proofRes = await axios.post('/api/proof/generate', {
+                                userAddress: address,
+                                requestId,
+                                type: 'location',
+                                userLat,
+                                userLon,
+                                providerLat,
+                                providerLon,
+                                radiusKm
+                            });
+
+                            if (proofRes.data.success) {
+                                toast.success("Location proof generated!");
+                            }
+                        } else {
+                            toast.error("Could not get GPS location");
+                        }
+                    }
+                } catch (vcError) {
+                    console.error('Could not fetch VC or generate proof:', vcError);
+                }
+            }
+
+            fetchRequests();
         } catch (error) {
-            alert("Failed to accept request");
+            console.error("Accept error:", error);
+            toast.error("Failed to accept request");
         }
     };
 
@@ -171,7 +264,7 @@ export default function UserDashboard() {
                 fetchRequests();
             }
         } catch (error) {
-            alert("Failed to deny request");
+            toast.error("Failed to deny request");
         }
     };
 
@@ -457,9 +550,9 @@ export default function UserDashboard() {
                                             <div
                                                 key={req._id}
                                                 className={`p-5 rounded-xl border ${req.status === 'pending' ? 'bg-amber-500/5 border-amber-500/30' :
-                                                        req.status === 'accepted' ? 'bg-emerald-500/5 border-emerald-500/30' :
-                                                            req.status === 'verified' ? 'bg-cyan-500/5 border-cyan-500/30' :
-                                                                'bg-neutral-800 border-neutral-700'
+                                                    req.status === 'accepted' ? 'bg-emerald-500/5 border-emerald-500/30' :
+                                                        req.status === 'verified' ? 'bg-cyan-500/5 border-cyan-500/30' :
+                                                            'bg-neutral-800 border-neutral-700'
                                                     }`}
                                             >
                                                 <div className="flex flex-col sm:flex-row sm:items-center gap-4">
@@ -504,7 +597,7 @@ export default function UserDashboard() {
                                                                 </Button>
                                                                 <Button
                                                                     size="sm"
-                                                                    onClick={() => handleAcceptRequest(req._id)}
+                                                                    onClick={() => handleAcceptRequest(req)}
                                                                     className="bg-emerald-500 hover:bg-emerald-600 text-black font-medium"
                                                                 >
                                                                     <CheckCircle2 className="w-4 h-4 mr-1" />
