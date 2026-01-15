@@ -138,7 +138,7 @@ export default function ProviderDashboard() {
     const handleVerifyProof = async (req: VerificationRequest) => {
         setVerifyingId(req._id);
         try {
-            // First verify off-chain
+            // Verify the proof
             const response = await axios.post('/api/verify', {
                 requestId: req._id,
                 proof: { pi_a: ['1', '2'], pi_b: [['1', '2'], ['3', '4']], pi_c: ['1', '2'] },
@@ -147,13 +147,6 @@ export default function ProviderDashboard() {
             });
 
             if (response.data.success) {
-                // Update request status
-                await axios.post('/api/request/accept', {
-                    requestId: req._id,
-                    action: 'verify'
-                }).catch(() => { });
-
-                setTxHash(null); // Would be set if on-chain verification is used
                 alert("✅ Proof Verified Successfully!");
                 fetchRequests();
             } else {

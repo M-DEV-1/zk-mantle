@@ -4,6 +4,7 @@
 
 [![Built on Mantle](https://img.shields.io/badge/Built%20on-Mantle-blue)](https://mantle.xyz)
 [![Circom](https://img.shields.io/badge/ZK-Circom-green)](https://docs.circom.io/)
+[![GitHub](https://img.shields.io/badge/GitHub-Repo-black)](https://github.com/M-DEV-1/zk-mantle)
 
 ## Overview
 
