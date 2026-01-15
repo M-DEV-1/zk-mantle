@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import axios from "axios";
+import { pinata, fetchVCPrivate } from "@/lib/pinata";
 
 interface VerificationRequest {
     _id: string;
@@ -172,9 +173,7 @@ export default function UserDashboard() {
             // 2. Fetch user's VC from IPFS
             if (cid) {
                 try {
-                    const gatewayUrl = process.env.NEXT_PUBLIC_GATEWAY_URL || 'https://gateway.pinata.cloud';
-                    const vcResponse = await fetch(`${gatewayUrl}/ipfs/${cid}`);
-                    const vcData = await vcResponse.json();
+                    const { data: vcData } = await fetchVCPrivate(cid);
 
                     console.log('VC Data for proof generation:', vcData);
 

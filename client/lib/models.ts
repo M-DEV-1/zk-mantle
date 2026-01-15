@@ -18,7 +18,7 @@ const RequestSchema = new Schema({
     },
     status: {
         type: String,
-        enum: ['pending', 'accepted', 'denied', 'expired', 'verified'],
+        enum: ['pending', 'accepted', 'denied', 'expired', 'verified', 'failed'],
         default: 'pending',
     },
     duration: { type: Number, required: true },

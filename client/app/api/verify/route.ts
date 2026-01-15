@@ -77,7 +77,7 @@ export async function POST(req: Request) {
             try {
                 await dbConnect();
                 await VerificationRequest.findByIdAndUpdate(requestId, {
-                    status: verified ? 'verified' : 'accepted',
+                    status: verified ? 'verified' : 'failed',
                     proofStatus: verified ? 'verified' : 'failed',
                     verifiedAt: verified ? new Date() : undefined,
                 });
