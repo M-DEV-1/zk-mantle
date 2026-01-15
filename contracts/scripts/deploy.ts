@@ -1,90 +1,64 @@
-import { viem, run } from "hardhat";
-
-async function verifyContract(address: string, constructorArguments: any[] = []) {
-    console.log(`Verifying contract at ${address}...`);
-    try {
-        await run("verify:verify", {
-            address,
-            constructorArguments,
-        });
-    } catch (error: any) {
-        if (error.message.toLowerCase().includes("already verified")) {
-            console.log("Already verified!");
-        } else {
-            console.log("Verification failed:", error);
-        }
-    }
-}
+import { ethers } from "hardhat";
 
 async function main() {
-    console.log("Starting deployment to Mantle Sepolia with Viem...");
-    const publicClient = await viem.getPublicClient();
+    console.log("Deploying ZK GPS contracts to Mantle Sepolia...\n");
 
-    // 1. Deploy SchemaRegistry
-    const schemaRegistry = await viem.deployContract("SchemaRegistry");
-    console.log(`SchemaRegistry deployed to: ${schemaRegistry.address}`);
+    const [deployer] = await ethers.getSigners();
+    console.log("Deployer:", deployer.address);
+    console.log("Balance:", ethers.formatEther(await ethers.provider.getBalance(deployer.address)), "MNT\n");
 
-    // 2. Deploy Verifiers
-    const verifierAge = await viem.deployContract("VerifierAge");
-    console.log(`VerifierAge deployed to: ${verifierAge.address}`);
+    // 1. Deploy Age Verifier (Groth16)
+    console.log("1. Deploying Age Verifier...");
+    const AgeVerifier = await ethers.getContractFactory("contracts/VerifierAge.sol:Groth16Verifier");
+    const ageVerifier = await AgeVerifier.deploy();
+    await ageVerifier.waitForDeployment();
+    const ageVerifierAddress = await ageVerifier.getAddress();
+    console.log("   Age Verifier deployed to:", ageVerifierAddress);
 
-    const verifierLocation = await viem.deployContract("VerifierLocation");
-    console.log(`VerifierLocation deployed to: ${verifierLocation.address}`);
+    // 2. Deploy Location Verifier (Groth16)
+    console.log("2. Deploying Location Verifier...");
+    const LocationVerifier = await ethers.getContractFactory("contracts/VerifierLocation.sol:Groth16Verifier");
+    const locationVerifier = await LocationVerifier.deploy();
+    await locationVerifier.waitForDeployment();
+    const locationVerifierAddress = await locationVerifier.getAddress();
+    console.log("   Location Verifier deployed to:", locationVerifierAddress);
 
-    // 3. Deploy DIDRegistry
-    const didRegistry = await viem.deployContract("DIDRegistry");
-    console.log(`DIDRegistry deployed to: ${didRegistry.address}`);
+    // 3. Deploy ZKGPSVerifier (main registry)
+    console.log("3. Deploying ZKGPSVerifier...");
+    const ZKGPSVerifier = await ethers.getContractFactory("ZKGPSVerifier");
+    const zkgpsVerifier = await ZKGPSVerifier.deploy(ageVerifierAddress);
+    await zkgpsVerifier.waitForDeployment();
+    const zkgpsVerifierAddress = await zkgpsVerifier.getAddress();
+    console.log("   ZKGPSVerifier deployed to:", zkgpsVerifierAddress);
 
-    // 4. Configure DIDRegistry
-    console.log("Configuring DIDRegistry...");
+    // 4. Deploy DID Registry
+    console.log("4. Deploying DID Registry...");
+    const DIDRegistry = await ethers.getContractFactory("DIDRegistry");
+    const didRegistry = await DIDRegistry.deploy();
+    await didRegistry.waitForDeployment();
+    const didRegistryAddress = await didRegistry.getAddress();
+    console.log("   DID Registry deployed to:", didRegistryAddress);
 
-    // Register Age Schema and Verifier
-    // schemaId must match what frontend uses. "age-check".
-    const tx1 = await didRegistry.write.setVerifier(["age-check", verifierAge.address]);
-    console.log(`Set verifier for 'age-check'. Tx: ${tx1}`);
+    // Summary
+    console.log("\n" + "=".repeat(60));
+    console.log("DEPLOYMENT COMPLETE");
+    console.log("=".repeat(60));
+    console.log(`
+Add these to your client .env:
 
-    // Register Location Schema and Verifier
-    // schemaId: "location-check"
-    const tx2 = await didRegistry.write.setVerifier(["location-check", verifierLocation.address]);
-    console.log(`Set verifier for 'location-check'. Tx: ${tx2}`);
+NEXT_PUBLIC_VERIFIER_AGE_ADDRESS=${ageVerifierAddress}
+NEXT_PUBLIC_VERIFIER_LOCATION_ADDRESS=${locationVerifierAddress}
+NEXT_PUBLIC_ZKGPS_VERIFIER_ADDRESS=${zkgpsVerifierAddress}
+NEXT_PUBLIC_DID_REGISTRY_ADDRESS=${didRegistryAddress}
 
-    // 5. Create Schemas in SchemaRegistry
-    console.log("Creating Schemas...");
-    const tx3 = await schemaRegistry.write.createSchema([
-        "age-check",
-        "Age Verification",
-        "Verifies user is above 18 without revealing exact age."
-    ]);
-    console.log(`Created schema 'age-check'. Tx: ${tx3}`);
-
-    const tx4 = await schemaRegistry.write.createSchema([
-        "location-check",
-        "Location Verification",
-        "Verifies user is within a specific radius of a provider."
-    ]);
-    console.log(`Created schema 'location-check'. Tx: ${tx4}`);
-
-    console.log("\nDeployment Complete!");
-    console.table({
-        SchemaRegistry: schemaRegistry.address,
-        VerifierAge: verifierAge.address,
-        VerifierLocation: verifierLocation.address,
-        DIDRegistry: didRegistry.address,
-    });
-
-    // Verify Contracts
-    console.log("\nVerifying contracts...");
-    // Wait a bit for block propagation
-    console.log("Waiting 10 seconds before verification...");
-    await new Promise(resolve => setTimeout(resolve, 10000));
-
-    await verifyContract(schemaRegistry.address);
-    await verifyContract(verifierAge.address);
-    await verifyContract(verifierLocation.address);
-    await verifyContract(didRegistry.address);
+View on MantleScan:
+https://sepolia.mantlescan.xyz/address/${zkgpsVerifierAddress}
+`);
 }
 
-main().catch((error) => {
-    console.error(error);
-    process.exitCode = 1;
-});
+main()
+    .then(() => process.exit(0))
+    .catch((error) => {
+        console.error(error);
+        process.exit(1);
+    });

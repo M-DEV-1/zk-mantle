@@ -15,12 +15,14 @@ const config: HardhatUserConfig = {
   defaultNetwork: "mantleSepolia",
   networks: {
     mantle: {
-      url: "https://rpc.mantle.xyz", // mainnet
+      url: "https://rpc.mantle.xyz",
       accounts: [getPrivateKey()],
     },
     mantleSepolia: {
       url: "https://rpc.sepolia.mantle.xyz",
       accounts: [getPrivateKey()],
+      // Force legacy transaction type by setting gasPrice
+      gasPrice: 20000000,
     },
   },
   etherscan: {
